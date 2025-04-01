@@ -99,21 +99,41 @@ static void Task_Tcp(u8 taskId)
     switch (data->state)
     {
         case TCP_STATE_INIT:
+            DebugPrint("Initializing...");
             Tcp_Load();
             EnableSerial32();
+            EnableSio();
+
+            sCounter = 0;
             data->state = TCP_STATE_HANDSHAKE;
+            DebugPrint("Sending handshake...");
             break;
         case TCP_STATE_HANDSHAKE:
-            EnableSio();
+            sCounter++;
+            if (sCounter > 60)
+            {
+                sCancellationReason = TCP_CANCEL_TIMEOUT;
+                data->state = TCP_STATE_DISCONNECTED;
+                DebugPrint("Handshake timed out!");
+            }
             break;
         case TCP_STATE_CONNECT:
             Tcp_Connect();
+
+            sCounter = 0;
             data->state = TCP_STATE_CONNECTING;
+            DebugPrint("Waiting for successful connection...");
             break;
         case TCP_STATE_CONNECTING:
+            sCounter++;
+            if (sCounter > 60)
+            {
+                sCancellationReason = TCP_CANCEL_TIMEOUT;
+                data->state = TCP_STATE_DISCONNECTED;
+                DebugPrint("Waiting for connection timed out!");
+            }
             break;
         case TCP_STATE_CONNECTED:
-            //sCounter++;
             break;
         case TCP_STATE_DISCONNECTED:
             DisableSerial();
@@ -134,6 +154,7 @@ void Tcp_SerialCallback(void)
         case TCP_STATE_HANDSHAKE:
             // check to see received handshake
             *(u32*)recv = REG_SIODATA32;
+            TcpLogf("Checking handshake: %d", REG_SIODATA32);
             for (i = 0, cnt1 = 0, cnt2 = 0; i < 2; i++)
             {
                 if (recv[i] == TCP_HANDSHAKE)
@@ -148,6 +169,7 @@ void Tcp_SerialCallback(void)
             if (cnt1 == 2 && cnt2 == 0)
             {
                 sState = TCP_STATE_CONNECT;
+                TcpLog("Handshake successful!");
             }
 
             // send the handshake
@@ -169,6 +191,7 @@ void Tcp_SerialCallback(void)
             if (cnt1 == 2 && cnt2 == 0)
             {
                 sState = TCP_STATE_CONNECTED;
+                TcpLog("Connected successfully!");
             }
             break;
         case TCP_STATE_CONNECTED:

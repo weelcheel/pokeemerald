@@ -1,10 +1,12 @@
 #ifndef GUARD_TCP_H
 #define GUARD_TCP_H
 
+#include "global.h"
+
 #define TCP_HANDSHAKE   0xBAC7
 #define TCP_CONNECTED   0xBAC8
-
-#include "global.h"
+#define TcpLog(pBuf) DebugPrint("[TCP LOG]: " pBuf)
+#define TcpLogf(pBuf, ...) DebugPrintf("[TCP LOG]: " pBuf, __VA_ARGS__)
 
 extern u8 gShouldAdvanceTcpState;
 

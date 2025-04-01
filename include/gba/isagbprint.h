@@ -49,6 +49,8 @@ void AGBPrintInit(void);
 #endif
 #endif
 
+#define DebugPrint(pBuf) DebugPrintf(pBuf, 0)
+
 #ifdef NDEBUG
 
 #define AGB_ASSERT(exp)

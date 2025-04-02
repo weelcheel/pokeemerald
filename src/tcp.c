@@ -35,7 +35,6 @@ enum {
 COMMON_DATA u8 gShouldAdvanceTcpState = 0;
 
 static u16 sCounter;
-static u8 sState;
 static u8 sCancellationReason;
 
 static void EnableSerial32(void);
@@ -53,9 +52,8 @@ static void EnableSerial32(void)
     REG_RCNT = 0;
     REG_SIOCNT = SIO_32BIT_MODE | SIO_INTR_ENABLE;
     REG_SIOCNT |= SIO_MULTI_SD;
-    REG_SIOCNT |= SIO_38400_BPS;
+    REG_SIOCNT |= SIO_115200_BPS;
     sCounter = 0;
-    sState = 0;
 }
 
 static void DisableSerial(void)
@@ -90,50 +88,66 @@ void CreateTcpTask(void)
     data->unused9 = 0;
     data->unused10 = 0;
     data->unused11 = AllocZeroed(64);
-    sState = 0;
 
-    DebugPrint("Created TCP task!");
+    TcpLog("Created TCP task!");
 }
 
 static void Task_Tcp(u8 taskId)
 {
+    u16 i, cnt1, cnt2;
+    u32 recv32;
+    u16 recv[2];
+
     struct TcpTaskData* data = (struct TcpTaskData*)gTasks[taskId].data;
     switch (data->state)
     {
         case TCP_STATE_INIT:
-            DebugPrint("Initializing...");
-            Tcp_Load();
+            TcpLog("Initializing...");
+            //Tcp_Load();
             EnableSerial32();
-            EnableSio();
 
             sCounter = 0;
             data->state = TCP_STATE_HANDSHAKE;
-            DebugPrint("Sending handshake...");
+            TcpLog("Sending handshake...");
             break;
         case TCP_STATE_HANDSHAKE:
-            sCounter++;
-            if (sCounter > 60)
+            sCounter++;    
+            // check to see received handshake
+            recv32 = REG_SIODATA32;
+            TcpLogf("Checking handshake: %04X", recv32);
+            if (recv32 == TCP_HANDSHAKE) 
+            {
+                data->state = TCP_STATE_CONNECTING;
+                TcpLog("Handshake successful!");
+            }
+            else if (sCounter > 60)
             {
                 sCancellationReason = TCP_CANCEL_TIMEOUT;
                 data->state = TCP_STATE_DISCONNECTED;
-                DebugPrint("Handshake timed out!");
+                TcpLog("Handshake timed out!");
             }
-            break;
-        case TCP_STATE_CONNECT:
-            Tcp_Connect();
-
-            sCounter = 0;
-            data->state = TCP_STATE_CONNECTING;
-            DebugPrint("Waiting for successful connection...");
+            else
+            {
+                REG_SIODATA32 = TCP_HANDSHAKE;
+            }
+            EnableSio();
             break;
         case TCP_STATE_CONNECTING:
             sCounter++;
-            if (sCounter > 60)
+            recv32 = REG_SIODATA32;
+            TcpLogf("Checking connection response: %04X", recv32);
+            if (recv32 == TCP_CONNECTED)
+            {
+                data->state = TCP_STATE_CONNECTED;
+                TcpLog("Connecting successful!");
+            }
+            else if (sCounter > 60)
             {
                 sCancellationReason = TCP_CANCEL_TIMEOUT;
                 data->state = TCP_STATE_DISCONNECTED;
-                DebugPrint("Waiting for connection timed out!");
+                TcpLog("Connecting timed out!");
             }
+            // REG_SIODATA32 = TCP_HANDSHAKE;
             break;
         case TCP_STATE_CONNECTED:
             break;
@@ -141,67 +155,14 @@ static void Task_Tcp(u8 taskId)
             DisableSerial();
             break;
     }
-
-    sState = data->state;
-}
-
-void Tcp_SerialCallback(void)
-{
-    u16 i, cnt1, cnt2;
-    u32 recv32;
-    u16 recv[2];
-
-    switch (sState)
-    {
-        case TCP_STATE_HANDSHAKE:
-            // check to see received handshake
-            *(u32*)recv = REG_SIODATA32;
-            TcpLogf("Checking handshake: %d", REG_SIODATA32);
-            for (i = 0, cnt1 = 0, cnt2 = 0; i < 2; i++)
-            {
-                if (recv[i] == TCP_HANDSHAKE)
-                {
-                    cnt1++;
-                }
-                else if (recv[i] != 0xFFFF)
-                {
-                    cnt2++;
-                }
-            }
-            if (cnt1 == 2 && cnt2 == 0)
-            {
-                sState = TCP_STATE_CONNECT;
-                TcpLog("Handshake successful!");
-            }
-
-            // send the handshake
-            REG_SIODATA32 = TCP_HANDSHAKE;
-            break;
-        case TCP_STATE_CONNECTING:
-            *(u32*)recv = REG_SIODATA32;
-            for (i = 0, cnt1 = 0, cnt2 = 0; i < 2; i++)
-            {
-                if (recv[i] == TCP_CONNECTED)
-                {
-                    cnt1++;
-                }
-                else if (recv[i] != 0xFFFF)
-                {
-                    cnt2++;
-                }
-            }
-            if (cnt1 == 2 && cnt2 == 0)
-            {
-                sState = TCP_STATE_CONNECTED;
-                TcpLog("Connected successfully!");
-            }
-            break;
-        case TCP_STATE_CONNECTED:
-            break;
-    }
 }
 
 static void Tcp_Connect(void)
+{
+
+}
+
+void Tcp_SerialCallback(void)
 {
 
 }

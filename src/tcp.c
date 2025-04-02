@@ -91,6 +91,8 @@ void CreateTcpTask(void)
     data->unused10 = 0;
     data->unused11 = AllocZeroed(64);
     sState = 0;
+
+    DebugPrint("Created TCP task!");
 }
 
 static void Task_Tcp(u8 taskId)

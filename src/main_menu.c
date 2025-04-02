@@ -37,6 +37,7 @@
 #include "title_screen.h"
 #include "window.h"
 #include "mystery_gift_menu.h"
+#include "login_menu.h"
 
 /*
  * Main menu state machine
@@ -523,6 +524,7 @@ enum
     ACTION_MYSTERY_GIFT,
     ACTION_MYSTERY_EVENTS,
     ACTION_EREADER,
+    ACTION_LOGIN,
     ACTION_INVALID
 };
 
@@ -776,7 +778,7 @@ static void Task_DisplayMainMenu(u8 taskId)
             LoadPalette(&palette, BG_PLTT_ID(15) + 1, PLTT_SIZEOF(1));
         }
 
-        switch (gTasks[taskId].tMenuType)
+        /*switch (gTasks[taskId].tMenuType)
         {
             case HAS_NO_SAVED_GAME:
             default:
@@ -869,7 +871,17 @@ static void Task_DisplayMainMenu(u8 taskId)
                     gTasks[tScrollArrowTaskId].tArrowTaskIsScrolled = TRUE;
                 }
                 break;
-        }
+        }*/
+        FillWindowPixelBuffer(0, PIXEL_FILL(0xA));
+        FillWindowPixelBuffer(1, PIXEL_FILL(0xA));
+        AddTextPrinterParameterized3(0, FONT_NORMAL, 0, 1, sTextColor_Headers, TEXT_SKIP_DRAW, gText_MainMenuLogin);
+        AddTextPrinterParameterized3(1, FONT_NORMAL, 0, 1, sTextColor_Headers, TEXT_SKIP_DRAW, gText_MainMenuOption);
+        PutWindowTilemap(0);
+        PutWindowTilemap(1);
+        CopyWindowToVram(0, COPYWIN_GFX);
+        CopyWindowToVram(1, COPYWIN_GFX);
+        DrawMainMenuWindowBorder(&sWindowTemplates_MainMenu[0], MAIN_MENU_BORDER_TILE);
+        DrawMainMenuWindowBorder(&sWindowTemplates_MainMenu[1], MAIN_MENU_BORDER_TILE);
         gTasks[taskId].func = Task_HighlightSelectedMainMenuItem;
     }
 }
@@ -950,7 +962,7 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
         ClearStdWindowAndFrame(6, TRUE);
         ClearStdWindowAndFrame(7, TRUE);
         wirelessAdapterConnected = IsWirelessAdapterConnected();
-        switch (gTasks[taskId].tMenuType)
+        /*switch (gTasks[taskId].tMenuType)
         {
             case HAS_NO_SAVED_GAME:
             default:
@@ -1049,7 +1061,19 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
                         break;
                 }
                 break;
+        }*/
+        
+        switch (gTasks[taskId].tCurrItem)
+        {
+            case 0:
+            default:
+                action = ACTION_LOGIN;
+                break;
+            case 1:
+                action = ACTION_OPTION;
+                break;
         }
+
         ChangeBgY(0, 0, BG_COORD_SET);
         ChangeBgY(1, 0, BG_COORD_SET);
         switch (action)
@@ -1081,6 +1105,10 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
                 break;
             case ACTION_EREADER:
                 SetMainCallback2(CB2_InitEReader);
+                DestroyTask(taskId);
+                break;
+            case ACTION_LOGIN:
+                SetMainCallback2(CB2_InitTcp);
                 DestroyTask(taskId);
                 break;
             case ACTION_INVALID:

@@ -147,7 +147,7 @@ static void Task_Tcp(u8 taskId)
                 data->state = TCP_STATE_DISCONNECTED;
                 TcpLog("Connecting timed out!");
             }
-            // REG_SIODATA32 = TCP_HANDSHAKE;
+            REG_SIODATA32 = 0;
             break;
         case TCP_STATE_CONNECTED:
             break;

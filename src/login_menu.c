@@ -10,6 +10,7 @@ void CB2_InitTcp(void)
 {
     CreateTcpTask();
     SetMainCallback2(MainCB2);
+    SetSerialCallback(Tcp_SerialCallback);
 }
 
 static void MainCB2(void)

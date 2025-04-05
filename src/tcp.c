@@ -2,6 +2,7 @@
 #include "task.h"
 #include "malloc.h"
 #include "main.h"
+#include "gpu_regs.h"
 
 struct TcpTaskData
 {
@@ -19,10 +20,12 @@ struct TcpTaskData
     u8* unused11;
 };
 
-enum {
+enum TcpState {
     TCP_STATE_INIT,
     TCP_STATE_HANDSHAKE,
-    TCP_STATE_CONNECT,
+    TCP_STATE_INIT_URL_META,
+    TCP_STATE_INIT_URL_TRANSFER,
+    TCP_STATE_PORT_TRANSFER,
     TCP_STATE_CONNECTING,
     TCP_STATE_CONNECTED,
     TCP_STATE_DISCONNECTED,
@@ -30,22 +33,20 @@ enum {
 
 enum {
     TCP_CANCEL_TIMEOUT,
+    TCP_CANCEL_CONNECTION_FAILED,
 };
 
 COMMON_DATA u8 gShouldAdvanceTcpState = 0;
 
 static u16 sCounter;
 static u8 sCancellationReason;
+static enum TcpState sTcpState;
 
 static void EnableSerial32(void);
 static void DisableSerial(void);
-static void EnableSio(void);
 
 static void Task_Tcp(u8);
-
 static void Tcp_Load(void);
-static void Tcp_Connect(void);
-static void Tcp_Reset(void);
 
 static void EnableSerial32(void)
 {
@@ -53,6 +54,8 @@ static void EnableSerial32(void)
     REG_SIOCNT = SIO_32BIT_MODE | SIO_INTR_ENABLE;
     REG_SIOCNT |= SIO_MULTI_SD;
     REG_SIOCNT |= SIO_115200_BPS;
+    REG_SIOCNT &= 0x7FF7;
+    EnableInterrupts(INTR_FLAG_SERIAL);
     sCounter = 0;
 }
 
@@ -64,11 +67,6 @@ static void DisableSerial(void)
     REG_SIOCNT = 0;
     REG_TM3CNT_H = 0;
     REG_IF = INTR_FLAG_TIMER3 | INTR_FLAG_SERIAL;
-}
-
-static void EnableSio(void)
-{
-    REG_SIOCNT |= SIO_ENABLE;
 }
 
 void CreateTcpTask(void)
@@ -94,60 +92,97 @@ void CreateTcpTask(void)
 
 static void Task_Tcp(u8 taskId)
 {
-    u16 i, cnt1, cnt2;
-    u32 recv32;
-    u16 recv[2];
+    TcpLog("Initializing...");
+    Tcp_Load();
+    EnableSerial32();
 
-    struct TcpTaskData* data = (struct TcpTaskData*)gTasks[taskId].data;
-    switch (data->state)
+    sCounter = 0;
+    sTcpState = TCP_STATE_HANDSHAKE;
+    DestroyTask(taskId);
+}
+
+void Tcp_SerialCallback(void)
+{
+    u32 recv32 = REG_SIODATA32;
+    u16 header;
+    u16 status;
+    u32 url;
+    u16 port;
+
+    REG_IF = INTR_FLAG_SERIAL;
+    TcpLogf("Received Serial Interrupt! inValue %08X | state %d", recv32, sTcpState);
+    switch (sTcpState)
     {
-        case TCP_STATE_INIT:
-            TcpLog("Initializing...");
-            //Tcp_Load();
-            EnableSerial32();
-
-            sCounter = 0;
-            data->state = TCP_STATE_HANDSHAKE;
-            TcpLog("Sending handshake...");
-            break;
         case TCP_STATE_HANDSHAKE:
             sCounter++;    
             // check to see received handshake
-            recv32 = REG_SIODATA32;
-            TcpLogf("Checking handshake: %04X", recv32);
-            if (recv32 == TCP_HANDSHAKE) 
+            if (recv32 == (TCP_HANDSHAKE_SUCCESS)) 
             {
-                data->state = TCP_STATE_CONNECTING;
+                sTcpState = TCP_STATE_INIT_URL_META;
+                REG_SIODATA32 = TCP_HANDSHAKE_SUCCESS;
                 TcpLog("Handshake successful!");
             }
             else if (sCounter > 60)
             {
                 sCancellationReason = TCP_CANCEL_TIMEOUT;
-                data->state = TCP_STATE_DISCONNECTED;
+                sTcpState = TCP_STATE_DISCONNECTED;
                 TcpLog("Handshake timed out!");
             }
             else
             {
                 REG_SIODATA32 = TCP_HANDSHAKE;
             }
-            EnableSio();
+            break;
+        case TCP_STATE_INIT_URL_META:
+            if (recv32 == (TCP_URL_META_SUCCESS))
+            {
+                TcpLog("Ready to send IP address!");
+                sTcpState = TCP_STATE_INIT_URL_TRANSFER;
+                
+                url = 2130706433; // local host
+                REG_SIODATA32 = url;
+            }
+            else 
+            {
+                REG_SIODATA32 = TCP_URL_META;
+            }
+            break;
+        case TCP_STATE_INIT_URL_TRANSFER:
+            if (recv32 == (TCP_URL_SUCCESS))
+            {
+                sTcpState = TCP_STATE_PORT_TRANSFER;
+                TcpLog("IP address transferred!");
+
+                port = 6969; // HTTP port
+                REG_SIODATA32 = port;
+            }
+            break;
+        case TCP_STATE_PORT_TRANSFER:
+            if (recv32 == (TCP_PORT_SUCCESS))
+            {
+                sTcpState = TCP_STATE_CONNECTING;
+                REG_SIODATA32 = TCP_PORT_SUCCESS;
+                TcpLog("Port transferred!");
+            }
             break;
         case TCP_STATE_CONNECTING:
-            sCounter++;
-            recv32 = REG_SIODATA32;
-            TcpLogf("Checking connection response: %04X", recv32);
-            if (recv32 == TCP_CONNECTED)
+            // break recv32 into 2 16 bit integers
+            header = recv32 & 0xFFFF;
+            status = (recv32 >> 16) & 0xFFFF;
+
+            if (header == TCP_CONNECT_HEADER && recv32 == (TCP_CONNECT_SUCCESS))
             {
-                data->state = TCP_STATE_CONNECTED;
-                TcpLog("Connecting successful!");
+                TcpLog("Connected!");
+                sTcpState = TCP_STATE_CONNECTED;
+                REG_SIODATA32 = TCP_CONNECT_SUCCESS;
             }
-            else if (sCounter > 60)
+            else if (header == TCP_DATA_FAILURE)
             {
-                sCancellationReason = TCP_CANCEL_TIMEOUT;
-                data->state = TCP_STATE_DISCONNECTED;
-                TcpLog("Connecting timed out!");
+                TcpLogf("Connection failed! Reason: %d", status);
+                sCancellationReason = TCP_CANCEL_CONNECTION_FAILED;
+                sTcpState = TCP_STATE_DISCONNECTED; 
+                REG_SIODATA32 = TCP_DATA_NOOP;
             }
-            REG_SIODATA32 = 0;
             break;
         case TCP_STATE_CONNECTED:
             break;
@@ -155,31 +190,15 @@ static void Task_Tcp(u8 taskId)
             DisableSerial();
             break;
     }
-}
 
-static void Tcp_Connect(void)
-{
-
-}
-
-void Tcp_SerialCallback(void)
-{
-
+    REG_SIOCNT &= 0x7FF7; // turn SO off so that we can receive signals again
 }
 
 static void Tcp_Load(void)
 {
-    volatile u16 backupIME = REG_IME;
-    REG_IME = 0;
-    gIntrTable[1] = Tcp_SerialCallback;
-    REG_IE |= INTR_FLAG_VCOUNT;
-    REG_IME = backupIME;
-}
-
-static void Tcp_Reset(void)
-{
-    volatile u16 backupIME = REG_IME;
-    REG_IME = 0;
-    RestoreSerialTimer3IntrHandlers();
-    REG_IME = backupIME;
+    // volatile u16 backupIME = REG_IME;
+    // REG_IME = 0;
+    // gIntrTable[1] = Tcp_SerialCallback;
+    // REG_IE |= INTR_FLAG_VCOUNT;
+    // REG_IME = backupIME;
 }

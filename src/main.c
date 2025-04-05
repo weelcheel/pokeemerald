@@ -24,6 +24,7 @@
 #include "main.h"
 #include "trainer_hill.h"
 #include "constants/rgb.h"
+#include "tcp.h"
 
 static void VBlankIntr(void);
 static void HBlankIntr(void);

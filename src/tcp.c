@@ -3,6 +3,7 @@
 #include "malloc.h"
 #include "main.h"
 #include "gpu_regs.h"
+#include "login_menu.h"
 
 struct TcpTaskData
 {
@@ -110,7 +111,7 @@ void Tcp_SerialCallback(void)
     u16 port;
 
     REG_IF = INTR_FLAG_SERIAL;
-    TcpLogf("Received Serial Interrupt! inValue %08X | state %d", recv32, sTcpState);
+    //TcpLogf("Received Serial Interrupt! inValue %08X | state %d", recv32, sTcpState);
     switch (sTcpState)
     {
         case TCP_STATE_HANDSHAKE:
@@ -175,6 +176,8 @@ void Tcp_SerialCallback(void)
                 TcpLog("Connected!");
                 sTcpState = TCP_STATE_CONNECTED;
                 REG_SIODATA32 = TCP_CONNECT_SUCCESS;
+
+                Tcp_Connected();
             }
             else if (header == TCP_DATA_FAILURE)
             {

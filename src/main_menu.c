@@ -39,6 +39,9 @@
 #include "mystery_gift_menu.h"
 #include "login_menu.h"
 
+#define MainMenuLog(pBuf) DebugPrint("[MMO LOG]: Main Menu - " pBuf)
+#define MainMenuLogf(pBuf, ...) DebugPrintf("[MMO LOG]: Main Menu - " pBuf, __VA_ARGS__)
+
 /*
  * Main menu state machine
  * -----------------------
@@ -944,6 +947,17 @@ static void Task_HandleMainMenuInput(u8 taskId)
         gTasks[taskId].func = Task_HighlightSelectedMainMenuItem;
 }
 
+static void HandleNewGameAfterLogin(void)
+{
+    gPlttBufferUnfaded[0] = RGB_BLACK;
+    gPlttBufferFaded[0] = RGB_BLACK;
+    
+    SetMainCallback2(CB2_MainMenu);
+    CreateTask(Task_NewGameBirchSpeech_Init, 0);
+
+    MainMenuLog("Trying to start new game after TCP connection.");
+}
+
 static void Task_HandleMainMenuAPressed(u8 taskId)
 {
     bool8 wirelessAdapterConnected;
@@ -1108,6 +1122,7 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
                 DestroyTask(taskId);
                 break;
             case ACTION_LOGIN:
+                gMain.savedCallback = HandleNewGameAfterLogin;
                 SetMainCallback2(CB2_InitTcp);
                 DestroyTask(taskId);
                 break;

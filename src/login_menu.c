@@ -13,6 +13,11 @@ void CB2_InitTcp(void)
     SetSerialCallback(Tcp_SerialCallback);
 }
 
+void Tcp_Connected(void)
+{
+    SetMainCallback2(gMain.savedCallback);
+}
+
 static void MainCB2(void)
 {
     RunTasks();

@@ -18,8 +18,8 @@
 #define TCP_CONNECT_HEADER      0xBACB
 #define TCP_CONNECT_SUCCESS     TCP_CONNECT_HEADER | (TCP_DATA_SUCCESS << 16)
 
-#define TcpLog(pBuf) DebugPrint("[TCP LOG]: " pBuf)
-#define TcpLogf(pBuf, ...) DebugPrintf("[TCP LOG]: " pBuf, __VA_ARGS__)
+#define TcpLog(pBuf) DebugPrint("[MMO LOG]: TCP - " pBuf)
+#define TcpLogf(pBuf, ...) DebugPrintf("[MMO LOG]: TCP - " pBuf, __VA_ARGS__)
 
 extern u8 gShouldAdvanceTcpState;
 

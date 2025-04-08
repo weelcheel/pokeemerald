@@ -15,6 +15,11 @@ void CB2_InitTcp(void)
 
 void Tcp_Connected(void)
 {
+    
+}
+
+void Tcp_Authenticated(void)
+{
     SetMainCallback2(gMain.savedCallback);
 }
 

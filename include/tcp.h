@@ -17,6 +17,10 @@
 #define TCP_PORT_SUCCESS        TCP_PORT_HEADER | (TCP_DATA_SUCCESS << 16)
 #define TCP_CONNECT_HEADER      0xBACB
 #define TCP_CONNECT_SUCCESS     TCP_CONNECT_HEADER | (TCP_DATA_SUCCESS << 16)
+#define TCP_SEND_TO_SIO         0xBACC
+#define TCP_RECEIVE_FROM_SIO    0xBACD
+
+#define TCP_PACKET_MAGIC        0x07100420
 
 #define TcpLog(pBuf) DebugPrint("[MMO LOG]: TCP - " pBuf)
 #define TcpLogf(pBuf, ...) DebugPrintf("[MMO LOG]: TCP - " pBuf, __VA_ARGS__)
@@ -25,5 +29,7 @@ extern u8 gShouldAdvanceTcpState;
 
 void CreateTcpTask(void);
 void Tcp_SerialCallback(void);
+
+static void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize);
 
 #endif // GUARD_LIBRFU_H

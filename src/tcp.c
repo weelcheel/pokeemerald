@@ -123,13 +123,20 @@ static void Task_Tcp(u8 taskId)
 
 static void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
 {
+    u32 result;
+
     TcpLogf("Processing command: %d", commandType);
     if (commandType == COMMAND_AUTH_RESULT && commandParamsSize == 4)
     {
         // print each byte of the commandParamsData
-        TcpLogf("Auth result command params bytes: %d %d %d %d", commandParamsData[0], commandParamsData[1], commandParamsData[2], commandParamsData[3]);
+        result = 0;
+        result |= commandParamsData[0];
+        result |= commandParamsData[1] << 8;
+        result |= commandParamsData[2] << 16;
+        result |= commandParamsData[3] << 24;
+        TcpLogf("Auth result: %08X", result);
 
-        if (commandParamsData[0] == 16 && commandParamsData[1] == 7 && commandParamsData[2] == 170 && commandParamsData[3] == 170)
+        if (result == COMMAND_SUCCESS)
         {
             TcpLog("Authentication successful!");
             sIsAuthenticated = TRUE;

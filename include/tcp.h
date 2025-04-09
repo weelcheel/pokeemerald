@@ -22,6 +22,8 @@
 
 #define TCP_PACKET_MAGIC        0x07100420
 
+#define COMMAND_SUCCESS         0xAAAA0710
+
 #define TcpLog(pBuf) DebugPrint("[MMO LOG]: TCP - " pBuf)
 #define TcpLogf(pBuf, ...) DebugPrintf("[MMO LOG]: TCP - " pBuf, __VA_ARGS__)
 

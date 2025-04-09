@@ -37,19 +37,25 @@ enum {
     TCP_CANCEL_CONNECTION_FAILED,
 };
 
+enum {
+    COMMAND_AUTH,
+    COMMAND_AUTH_RESULT,
+};
+
 COMMON_DATA u8 gShouldAdvanceTcpState = 0;
 
 EWRAM_DATA u8 gIncomingTcpData[4096] = {0};
 static u16 sExpectedIncomingByteCount;
 static u16 sIncomingBytesReceived;
 
-EWRAM_DATA u8 gOutgoingTcpData[1030] = {0};
+EWRAM_DATA u8 gOutgoingTcpData[1025] = {0};
 static u16 sOutgoingTcpDataSize;
 static u16 sOutgoingTcpSentBytes;
 static bool8 sHasSentOutgoingHeader;
 
 EWRAM_DATA u8 gOutgoingCommandsQueue[1024] = {0};
 static u16 sOutgoingCommandsQueueSize;
+static u8 sOutgoingCommandsQueueCount;
 
 static u16 sCounter;
 static u8 sCancellationReason;
@@ -118,6 +124,22 @@ static void Task_Tcp(u8 taskId)
 static void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
 {
     TcpLogf("Processing command: %d", commandType);
+    if (commandType == COMMAND_AUTH_RESULT && commandParamsSize == 4)
+    {
+        if (*(u32*)commandParamsData == 0xAAAA0710)
+        {
+            TcpLog("Authentication successful!");
+            sIsAuthenticated = TRUE;
+            sHasSentAuthRequest = FALSE;
+            Tcp_Authenticated();
+        }
+        else
+        {
+            TcpLog("Authentication failed!");
+            sCancellationReason = TCP_CANCEL_CONNECTION_FAILED;
+            sTcpState = TCP_STATE_DISCONNECTED;
+        }
+    }
 }
 
 static void ProcessIncomingData()
@@ -175,30 +197,36 @@ static void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsS
     }
     gOutgoingCommandsQueue[sOutgoingCommandsQueueSize] = commandType;
     gOutgoingCommandsQueue[sOutgoingCommandsQueueSize + 1] = commandParamsSize;
-    memcpy(gOutgoingCommandsQueue + sOutgoingCommandsQueueSize + 2, commandParamsData, commandParamsSize);
+    if (commandParamsSize > 0)
+    {
+        memcpy(gOutgoingCommandsQueue + sOutgoingCommandsQueueSize + 2, commandParamsData, commandParamsSize);
+    }
     sOutgoingCommandsQueueSize += commandParamsSize + 2;
+    sOutgoingCommandsQueueCount++;
+
+    TcpLogf("Queued command %d with size %d | %d commands queued", commandType, commandParamsSize, sOutgoingCommandsQueueCount);
 }
 
 static u32 Send()
 {
     u32 result = TCP_DATA_NOOP;
     u16 i;
+    u8 underFourBytes[4];
+    
+    memset(underFourBytes, 0, sizeof(underFourBytes));
 
     // if data is not currently being sent, copy the outgoing command queue to the outgoing data buffer
     if (sOutgoingTcpDataSize == 0)
     {
         // check to see if there is data to send
-        if (sOutgoingCommandsQueueSize > 0 && sOutgoingCommandsQueueSize < sizeof(gOutgoingTcpData) - 6)
+        if (sOutgoingCommandsQueueSize > 0 && sOutgoingCommandsQueueSize < sizeof(gOutgoingTcpData) - 1)
         {
-            gOutgoingTcpData[0] = TCP_PACKET_MAGIC & 0xFF;
-            gOutgoingTcpData[1] = (TCP_PACKET_MAGIC >> 8) & 0xFF;
-            gOutgoingTcpData[2] = (TCP_PACKET_MAGIC >> 16) & 0xFF;
-            gOutgoingTcpData[3] = (TCP_PACKET_MAGIC >> 24) & 0xFF;
-            gOutgoingTcpData[4] = sOutgoingCommandsQueueSize & 0xFF;
-            gOutgoingTcpData[5] = (sOutgoingCommandsQueueSize >> 8) & 0xFF;
-            memcpy(gOutgoingTcpData + 6, gOutgoingCommandsQueue, sOutgoingCommandsQueueSize);
-            sOutgoingTcpDataSize = sOutgoingCommandsQueueSize + 6;
+            TcpLog("Sending new command data to SIO.");
+            gOutgoingTcpData[0] = sOutgoingCommandsQueueCount;
+            memcpy(gOutgoingTcpData + 1, gOutgoingCommandsQueue, sOutgoingCommandsQueueSize);
+            sOutgoingTcpDataSize = sOutgoingCommandsQueueSize + 1;
             sOutgoingCommandsQueueSize = 0;
+            sOutgoingCommandsQueueCount = 0;
             sOutgoingTcpSentBytes = 0;
         }
     }
@@ -209,6 +237,7 @@ static u32 Send()
         if (!sHasSentOutgoingHeader)
         {
             result = TCP_SEND_TO_SIO | (sOutgoingTcpDataSize << 16);
+            sHasSentOutgoingHeader = TRUE;
         }
         else if (sOutgoingTcpSentBytes < sOutgoingTcpDataSize)
         {
@@ -216,13 +245,14 @@ static u32 Send()
             {
                 for (i = 0; i < sOutgoingTcpDataSize - sOutgoingTcpSentBytes; i++)
                 {
-                    result |= gOutgoingTcpData[sOutgoingTcpSentBytes + i] << (i * 8);
+                    underFourBytes[i] = gOutgoingTcpData[sOutgoingTcpSentBytes + i];
                 }
+                result = *(u32*)underFourBytes;
                 sOutgoingTcpSentBytes += sOutgoingTcpDataSize - sOutgoingTcpSentBytes;
             }
             else
             {
-                result = *(u32*)gOutgoingTcpData + sOutgoingTcpSentBytes;
+                result = *(u32*)(gOutgoingTcpData + sOutgoingTcpSentBytes);
                 sOutgoingTcpSentBytes += 4;
             }
 
@@ -235,6 +265,11 @@ static u32 Send()
                 memset(gOutgoingTcpData, 0, sizeof(gOutgoingTcpData));
             }
         }
+    }
+
+    if (result != TCP_DATA_NOOP)
+    {
+        TcpLogf("Sending data: %08X", result);
     }
 
     return result;
@@ -290,7 +325,7 @@ static void Receive(u32 inData)
 
 static void SendAuthRequest(void)
 {
-
+    SendCommand(COMMAND_AUTH, NULL, 0);
 }
 
 void Tcp_SerialCallback(void)
@@ -374,6 +409,8 @@ void Tcp_SerialCallback(void)
                 sIncomingBytesReceived = 0;
                 sOutgoingTcpDataSize = 0;
                 sHasSentOutgoingHeader = FALSE;
+                sOutgoingCommandsQueueSize = 0;
+                sOutgoingCommandsQueueCount = 0;
 
                 Tcp_Connected();
             }
@@ -390,7 +427,6 @@ void Tcp_SerialCallback(void)
             {
                 SendAuthRequest();
                 sHasSentAuthRequest = TRUE;
-                Tcp_Authenticated();
             }
             Receive(recv32);
             REG_SIODATA32 = Send();

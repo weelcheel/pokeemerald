@@ -126,7 +126,10 @@ static void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandPara
     TcpLogf("Processing command: %d", commandType);
     if (commandType == COMMAND_AUTH_RESULT && commandParamsSize == 4)
     {
-        if (*(u32*)commandParamsData == 0xAAAA0710)
+        // print each byte of the commandParamsData
+        TcpLogf("Auth result command params bytes: %d %d %d %d", commandParamsData[0], commandParamsData[1], commandParamsData[2], commandParamsData[3]);
+
+        if (commandParamsData[0] == 16 && commandParamsData[1] == 7 && commandParamsData[2] == 170 && commandParamsData[3] == 170)
         {
             TcpLog("Authentication successful!");
             sIsAuthenticated = TRUE;
@@ -144,46 +147,81 @@ static void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandPara
 
 static void ProcessIncomingData()
 {
-    u8 commandCount;
-    u16 bytesRead;
+    u8 commandCount, commandsProccessed;
+    u8 commandType, commandParamsLength;
+    u8 shouldContinueReading;
     u8 i;
+    u16 bytesRead;
 
-    if (sIncomingBytesReceived < 6)
+    if (sIncomingBytesReceived < 3)
     {
         // not enough data to be a valid packet
-        TcpLog("Invalid packet received.");
+        TcpLog("Invalid list of commands received.");
+        memset(gIncomingTcpData, 0, sizeof(gIncomingTcpData));
+        sExpectedIncomingByteCount = 0;
+        sIncomingBytesReceived = 0;
         return;
     }
 
-    // first four bytes should be the magic number
-    if (*(u32*)gIncomingTcpData == TCP_PACKET_MAGIC)
+    // first byte should be the command count
+    commandCount = gIncomingTcpData[0];
+    if (commandCount == 0)
     {
-        // next two bytes should be the length of the data to read
-        if (*(u16*)(gIncomingTcpData + 4) != sIncomingBytesReceived - 6)
+        // no commands to process
+        TcpLog("No commands to process.");
+        memset(gIncomingTcpData, 0, sizeof(gIncomingTcpData));
+        sExpectedIncomingByteCount = 0;
+        sIncomingBytesReceived = 0;
+        return;
+    }
+
+    shouldContinueReading = TRUE;
+    bytesRead = 0;
+    commandsProccessed = 0;
+    while (shouldContinueReading)
+    {
+        if (bytesRead + 2 >= sIncomingBytesReceived - 1)
         {
-            // length does not match the number of bytes received
-            TcpLog("Invalid data length received in packet header.");
-            return;
+            // not enough data to read the next command
+            shouldContinueReading = FALSE;
+            break;
         }
 
-        // valid header, now 6 bytes into the data is the actual command array
-        // first byte is the number of commands in the array
-        commandCount = gIncomingTcpData[6];
-        if (commandCount == 0)
+        commandType = gIncomingTcpData[1 + bytesRead];
+        commandParamsLength = gIncomingTcpData[2 + bytesRead];
+        bytesRead += 2;
+
+        if (bytesRead + commandParamsLength > sIncomingBytesReceived - 1)
         {
-            TcpLog("No commands received.");
-            return;
+            // not enough data to read the command parameters
+            shouldContinueReading = FALSE;
+            break;
         }
 
-        bytesRead = 0;
-        for (i = 0; i < commandCount; i++)
+        if (commandParamsLength > 0)
         {
-            ProcessCommand(gIncomingTcpData[7 + bytesRead], gIncomingTcpData + 9 + bytesRead, gIncomingTcpData[8 + bytesRead]);
+            // process the command with parameters
+            ProcessCommand(commandType, gIncomingTcpData + bytesRead + 1, commandParamsLength);
+            bytesRead += commandParamsLength;
+            commandsProccessed++;
         }
+        else
+        {
+            // process the command without parameters
+            ProcessCommand(commandType, NULL, 0);
+            commandsProccessed++;
+        }
+    }
+
+    if (commandsProccessed == commandCount)
+    {
+        // all commands have been processed
+        TcpLog("All commands processed.");
     }
     else
     {
-        TcpLog("Invalid magic number received.");
+        // not all commands were processed
+        TcpLogf("Not all commands were processed. %d of %d commands processed.", commandsProccessed, commandCount);
     }
 }
 

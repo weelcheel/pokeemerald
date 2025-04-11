@@ -22,16 +22,38 @@
 
 #define TCP_PACKET_MAGIC        0x07100420
 
-#define COMMAND_SUCCESS         0xAAAA0710
-
 #define TcpLog(pBuf) DebugPrint("[MMO LOG]: TCP - " pBuf)
 #define TcpLogf(pBuf, ...) DebugPrintf("[MMO LOG]: TCP - " pBuf, __VA_ARGS__)
 
+enum TcpState {
+    TCP_STATE_INIT,
+    TCP_STATE_HANDSHAKE,
+    TCP_STATE_INIT_URL_META,
+    TCP_STATE_INIT_URL_TRANSFER,
+    TCP_STATE_PORT_TRANSFER,
+    TCP_STATE_CONNECTING,
+    TCP_STATE_CONNECTED,
+    TCP_STATE_DISCONNECTED,
+};
+
+enum {
+    TCP_CANCEL_TIMEOUT,
+    TCP_CANCEL_CONNECTION_FAILED,
+};
+
 extern u8 gShouldAdvanceTcpState;
+
+extern u16 gOutgoingCommandsQueueSize;
+extern u8 gOutgoingCommandsQueueCount;
+extern bool8 gIsOutgoingCommandsQueueReady;
+extern u8 gOutgoingCommandsQueue[1024];
+
+static bool8 sIsAuthenticated;
+static bool8 sHasSentAuthRequest;
+static u8 sCancellationReason;
+static enum TcpState sTcpState;
 
 void CreateTcpTask(void);
 void Tcp_SerialCallback(void);
-
-static void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize);
 
 #endif // GUARD_LIBRFU_H

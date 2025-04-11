@@ -29,6 +29,7 @@
 #include "constants/mauville_old_man.h"
 #include "constants/trainer_types.h"
 #include "constants/union_room.h"
+#include "mmo.h"
 
 // this file was known as evobjmv.c in Game Freak's original source
 
@@ -1629,6 +1630,11 @@ u8 CreateVirtualObject(u8 graphicsId, u8 virtualObjId, s16 x, s16 y, u8 elevatio
         StartSpriteAnim(sprite, GetFaceDirectionAnimNum(direction));
     }
     return spriteId;
+}
+
+u8 GetMMOObjectEventIdByLocalId(u8 localId)
+{
+    return GetObjectEventIdByLocalId(localId);
 }
 
 void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)

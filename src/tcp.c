@@ -3,6 +3,7 @@
 #include "malloc.h"
 #include "main.h"
 #include "gpu_regs.h"
+#include "mmo.h"
 #include "login_menu.h"
 
 struct TcpTaskData
@@ -21,28 +22,11 @@ struct TcpTaskData
     u8* unused11;
 };
 
-enum TcpState {
-    TCP_STATE_INIT,
-    TCP_STATE_HANDSHAKE,
-    TCP_STATE_INIT_URL_META,
-    TCP_STATE_INIT_URL_TRANSFER,
-    TCP_STATE_PORT_TRANSFER,
-    TCP_STATE_CONNECTING,
-    TCP_STATE_CONNECTED,
-    TCP_STATE_DISCONNECTED,
-};
-
-enum {
-    TCP_CANCEL_TIMEOUT,
-    TCP_CANCEL_CONNECTION_FAILED,
-};
-
-enum {
-    COMMAND_AUTH,
-    COMMAND_AUTH_RESULT,
-};
-
 COMMON_DATA u8 gShouldAdvanceTcpState = 0;
+EWRAM_DATA u16 gOutgoingCommandsQueueSize = 0;
+EWRAM_DATA u8 gOutgoingCommandsQueueCount = 0;
+EWRAM_DATA u8 gOutgoingCommandsQueue[1024] = {0};
+EWRAM_DATA bool8 gIsOutgoingCommandsQueueReady = FALSE;
 
 EWRAM_DATA u8 gIncomingTcpData[4096] = {0};
 static u16 sExpectedIncomingByteCount;
@@ -53,15 +37,10 @@ static u16 sOutgoingTcpDataSize;
 static u16 sOutgoingTcpSentBytes;
 static bool8 sHasSentOutgoingHeader;
 
-EWRAM_DATA u8 gOutgoingCommandsQueue[1024] = {0};
-static u16 sOutgoingCommandsQueueSize;
-static u8 sOutgoingCommandsQueueCount;
-
 static u16 sCounter;
-static u8 sCancellationReason;
-static enum TcpState sTcpState;
-static bool8 sIsAuthenticated;
-static bool8 sHasSentAuthRequest;
+
+u32 Send(void);
+void Receive(u32 inData);
 
 static void EnableSerial32(void);
 static void DisableSerial(void);
@@ -119,37 +98,6 @@ static void Task_Tcp(u8 taskId)
     sCounter = 0;
     sTcpState = TCP_STATE_HANDSHAKE;
     DestroyTask(taskId);
-}
-
-static void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
-{
-    u32 result;
-
-    TcpLogf("Processing command: %d", commandType);
-    if (commandType == COMMAND_AUTH_RESULT && commandParamsSize == 4)
-    {
-        // print each byte of the commandParamsData
-        result = 0;
-        result |= commandParamsData[0];
-        result |= commandParamsData[1] << 8;
-        result |= commandParamsData[2] << 16;
-        result |= commandParamsData[3] << 24;
-        TcpLogf("Auth result: %08X", result);
-
-        if (result == COMMAND_SUCCESS)
-        {
-            TcpLog("Authentication successful!");
-            sIsAuthenticated = TRUE;
-            sHasSentAuthRequest = FALSE;
-            Tcp_Authenticated();
-        }
-        else
-        {
-            TcpLog("Authentication failed!");
-            sCancellationReason = TCP_CANCEL_CONNECTION_FAILED;
-            sTcpState = TCP_STATE_DISCONNECTED;
-        }
-    }
 }
 
 static void ProcessIncomingData()
@@ -232,47 +180,25 @@ static void ProcessIncomingData()
     }
 }
 
-static void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
-{
-    if (sOutgoingCommandsQueueSize + commandParamsSize + 2 > sizeof(gOutgoingCommandsQueue))
-    {
-        // not enough space in the queue to send the command
-        TcpLogf("Not enough space in outgoing commands queue for command %d", commandType);
-        return;
-    }
-    gOutgoingCommandsQueue[sOutgoingCommandsQueueSize] = commandType;
-    gOutgoingCommandsQueue[sOutgoingCommandsQueueSize + 1] = commandParamsSize;
-    if (commandParamsSize > 0)
-    {
-        memcpy(gOutgoingCommandsQueue + sOutgoingCommandsQueueSize + 2, commandParamsData, commandParamsSize);
-    }
-    sOutgoingCommandsQueueSize += commandParamsSize + 2;
-    sOutgoingCommandsQueueCount++;
-
-    TcpLogf("Queued command %d with size %d | %d commands queued", commandType, commandParamsSize, sOutgoingCommandsQueueCount);
-}
-
-static u32 Send()
+u32 Send(void)
 {
     u32 result = TCP_DATA_NOOP;
     u16 i;
-    u8 underFourBytes[4];
-    
-    memset(underFourBytes, 0, sizeof(underFourBytes));
 
     // if data is not currently being sent, copy the outgoing command queue to the outgoing data buffer
     if (sOutgoingTcpDataSize == 0)
     {
         // check to see if there is data to send
-        if (sOutgoingCommandsQueueSize > 0 && sOutgoingCommandsQueueSize < sizeof(gOutgoingTcpData) - 1)
+        if (gIsOutgoingCommandsQueueReady && gOutgoingCommandsQueueSize > 0 && gOutgoingCommandsQueueSize < sizeof(gOutgoingTcpData) - 1)
         {
             TcpLog("Sending new command data to SIO.");
-            gOutgoingTcpData[0] = sOutgoingCommandsQueueCount;
-            memcpy(gOutgoingTcpData + 1, gOutgoingCommandsQueue, sOutgoingCommandsQueueSize);
-            sOutgoingTcpDataSize = sOutgoingCommandsQueueSize + 1;
-            sOutgoingCommandsQueueSize = 0;
-            sOutgoingCommandsQueueCount = 0;
+            gOutgoingTcpData[0] = gOutgoingCommandsQueueCount;
+            memcpy(gOutgoingTcpData + 1, gOutgoingCommandsQueue, gOutgoingCommandsQueueSize);
+            sOutgoingTcpDataSize = gOutgoingCommandsQueueSize + 1;
+            gOutgoingCommandsQueueSize = 0;
+            gOutgoingCommandsQueueCount = 0;
             sOutgoingTcpSentBytes = 0;
+            gIsOutgoingCommandsQueueReady = FALSE;
         }
     }
 
@@ -286,20 +212,16 @@ static u32 Send()
         }
         else if (sOutgoingTcpSentBytes < sOutgoingTcpDataSize)
         {
-            if (sOutgoingTcpDataSize - sOutgoingTcpSentBytes < 4)
+            result = 0;
+            for (i = 0; i < sOutgoingTcpDataSize - sOutgoingTcpSentBytes; i++)
             {
-                for (i = 0; i < sOutgoingTcpDataSize - sOutgoingTcpSentBytes; i++)
+                result |= gOutgoingTcpData[sOutgoingTcpSentBytes + i] << (i * 8);
+                if (i == 3)
                 {
-                    underFourBytes[i] = gOutgoingTcpData[sOutgoingTcpSentBytes + i];
+                    break;
                 }
-                result = *(u32*)underFourBytes;
-                sOutgoingTcpSentBytes += sOutgoingTcpDataSize - sOutgoingTcpSentBytes;
             }
-            else
-            {
-                result = *(u32*)(gOutgoingTcpData + sOutgoingTcpSentBytes);
-                sOutgoingTcpSentBytes += 4;
-            }
+            sOutgoingTcpSentBytes += i + 1;
 
             if (sOutgoingTcpSentBytes >= sOutgoingTcpDataSize)
             {
@@ -308,6 +230,9 @@ static u32 Send()
                 sOutgoingTcpSentBytes = 0;
                 sHasSentOutgoingHeader = FALSE;
                 memset(gOutgoingTcpData, 0, sizeof(gOutgoingTcpData));
+                gOutgoingCommandsQueueSize = 0;
+                gOutgoingCommandsQueueCount = 0;
+                memset(gOutgoingCommandsQueue, 0, sizeof(gOutgoingCommandsQueue));
             }
         }
     }
@@ -320,7 +245,7 @@ static u32 Send()
     return result;
 }
 
-static void Receive(u32 inData)
+void Receive(u32 inData)
 {
     u8 incomingData[4];
     u8 bytesToRead;
@@ -454,8 +379,8 @@ void Tcp_SerialCallback(void)
                 sIncomingBytesReceived = 0;
                 sOutgoingTcpDataSize = 0;
                 sHasSentOutgoingHeader = FALSE;
-                sOutgoingCommandsQueueSize = 0;
-                sOutgoingCommandsQueueCount = 0;
+                gOutgoingCommandsQueueSize = 0;
+                gOutgoingCommandsQueueCount = 0;
 
                 Tcp_Connected();
             }

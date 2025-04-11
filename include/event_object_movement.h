@@ -3,6 +3,9 @@
 
 #include "constants/event_object_movement.h"
 
+#define MoveLog(pBuf) DebugPrint("[MMO LOG]: Event Object Movemnt - " pBuf)
+#define MoveLogf(pBuf, ...) DebugPrintf("[MMO LOG]: Event Object Movement - " pBuf, __VA_ARGS__)
+
 // Palette slots for overworld NPCs.
 // The same standard set of palettes for overworld objects are normally always loaded at the same
 // time while walking around the overworld. The only exceptions are the palettes for the player and
@@ -104,6 +107,7 @@ extern const u8 *const gBerryTreeObjectEventGraphicsIdTablePointers[];
 extern const struct SpriteFrameImage *const gBerryTreePicTablePointers[];
 extern const u8 *const gBerryTreePaletteSlotTablePointers[];
 
+u8 GetMMOObjectEventIdByLocalId(u8);
 void ResetObjectEvents(void);
 u8 GetMoveDirectionAnimNum(u8 direction);
 u8 GetObjectEventIdByLocalIdAndMap(u8 localId, u8 mapNum, u8 mapGroupId);

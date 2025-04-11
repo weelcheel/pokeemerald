@@ -26,6 +26,9 @@
 
 #define SKIP_OBJECT_EVENT_LOAD  1
 
+#define OverworldLog(pBuf) DebugPrint("[MMO LOG]: Overworld - " pBuf)
+#define OverworldLogf(pBuf, ...) DebugPrintf("[MMO LOG]: Overworld - " pBuf, __VA_ARGS__)
+
 struct InitialPlayerAvatarState
 {
     u8 transitionFlags;

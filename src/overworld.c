@@ -66,6 +66,7 @@
 #include "constants/songs.h"
 #include "constants/trainer_hill.h"
 #include "constants/weather.h"
+#include "mmo.h"
 
 struct CableClubPlayer
 {
@@ -1438,6 +1439,9 @@ bool32 IsOverworldLinkActive(void)
 static void DoCB1_Overworld(u16 newKeys, u16 heldKeys)
 {
     struct FieldInput inputStruct;
+    u8 moveCommandData[7];
+
+    memset(moveCommandData, 0, 7);
 
     UpdatePlayerAvatarTransitionState();
     FieldClearPlayerInput(&inputStruct);
@@ -1452,6 +1456,13 @@ static void DoCB1_Overworld(u16 newKeys, u16 heldKeys)
         else
         {
             PlayerStep(inputStruct.dpadDirection, newKeys, heldKeys);
+            
+            memcpy(moveCommandData, &gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.x, 2);
+            memcpy(moveCommandData + 2, &gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.x, 2);
+            moveCommandData[4] = gObjectEvents[gPlayerAvatar.objectEventId].movementActionId;
+            moveCommandData[5] = gObjectEvents[gPlayerAvatar.objectEventId].currentElevation;
+            moveCommandData[6] = gObjectEvents[gPlayerAvatar.objectEventId].previousMovementDirection;
+            SendCommand(COMMAND_MOVE, moveCommandData, 7);
         }
     }
 }
@@ -1888,6 +1899,9 @@ static bool32 LoadMapInStepsLink(u8 *state)
 
 static bool32 LoadMapInStepsLocal(u8 *state, bool32 a2)
 {
+    u8 mapParams[2] = {0};
+    memset(mapParams, 0, 2);
+
     switch (*state)
     {
     case 0:
@@ -1952,6 +1966,10 @@ static bool32 LoadMapInStepsLocal(u8 *state, bool32 a2)
             (*state)++;
         break;
     case 13:
+        // report this to the game server
+        mapParams[0] = (u8)gSaveBlock1Ptr->location.mapGroup;
+        mapParams[1] = (u8)gSaveBlock1Ptr->location.mapNum;
+        SendCommand(COMMAND_JOIN_MAP, mapParams, 2);
         return TRUE;
     }
 

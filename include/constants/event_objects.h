@@ -295,6 +295,9 @@
 #define OBJ_EVENT_ID_PLAYER 0xFF
 #define OBJ_EVENT_ID_CAMERA 0x7F
 
+#define OBJ_EVENT_ID_MMO_FIRST   180
+#define OBJ_EVENT_ID_MMO_LAST    244
+
 // Object event local ids referenced in C files
 #define LOCALID_ROUTE111_PLAYER_FALLING 45
 #define LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK 1

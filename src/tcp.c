@@ -103,7 +103,8 @@ static void Task_Tcp(u8 taskId)
 static void ProcessIncomingData()
 {
     u8 commandCount, commandsProccessed;
-    u8 commandType, commandParamsLength;
+    u8 commandType;
+    u16 commandParamsLength;
     u8 shouldContinueReading;
     u8 i;
     u16 bytesRead;
@@ -135,7 +136,7 @@ static void ProcessIncomingData()
     commandsProccessed = 0;
     while (shouldContinueReading)
     {
-        if (bytesRead + 2 >= sIncomingBytesReceived - 1)
+        if (bytesRead + 3 >= sIncomingBytesReceived - 1)
         {
             // not enough data to read the next command
             shouldContinueReading = FALSE;
@@ -143,8 +144,8 @@ static void ProcessIncomingData()
         }
 
         commandType = gIncomingTcpData[1 + bytesRead];
-        commandParamsLength = gIncomingTcpData[2 + bytesRead];
-        bytesRead += 2;
+        commandParamsLength = gIncomingTcpData[2 + bytesRead] | (gIncomingTcpData[3 + bytesRead] << 8);
+        bytesRead += 3;
 
         if (bytesRead + commandParamsLength > sIncomingBytesReceived - 1)
         {
@@ -248,8 +249,11 @@ u32 Send(void)
 void Receive(u32 inData)
 {
     u8 incomingData[4];
-    u8 bytesToRead;
+    u16 bytesToRead;
     u8 i;
+
+    if (inData == TCP_DATA_NOOP)
+        return;
 
     if (sExpectedIncomingByteCount)
     {
@@ -291,11 +295,6 @@ void Receive(u32 inData)
             sIncomingBytesReceived = 0;
         }
     }
-}
-
-static void SendAuthRequest(void)
-{
-    SendCommand(COMMAND_AUTH, NULL, 0);
 }
 
 void Tcp_SerialCallback(void)
@@ -393,11 +392,6 @@ void Tcp_SerialCallback(void)
             }
             break;
         case TCP_STATE_CONNECTED:
-            if (!sIsAuthenticated && !sHasSentAuthRequest)
-            {
-                SendAuthRequest();
-                sHasSentAuthRequest = TRUE;
-            }
             Receive(recv32);
             REG_SIODATA32 = Send();
             break;

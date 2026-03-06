@@ -949,13 +949,12 @@ static void Task_HandleMainMenuInput(u8 taskId)
 
 static void HandleNewGameAfterLogin(void)
 {
-    gPlttBufferUnfaded[0] = RGB_BLACK;
-    gPlttBufferFaded[0] = RGB_BLACK;
-    
-    SetMainCallback2(CB2_MainMenu);
-    CreateTask(Task_NewGameBirchSpeech_Init, 0);
+    gSaveBlock2Ptr->playerGender = MALE;
+    gSaveBlock2Ptr->playerName[0] = 0xBB; // 'A'
+    gSaveBlock2Ptr->playerName[1] = EOS;
+    SetMainCallback2(CB2_NewGame);
 
-    MainMenuLog("Trying to start new game after TCP connection.");
+    MainMenuLog("Starting new game after login.");
 }
 
 static void Task_HandleMainMenuAPressed(u8 taskId)

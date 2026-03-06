@@ -8,16 +8,30 @@
 
 EWRAM_DATA u8 gGameUserId = 0;
 
-static void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize);
-static void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize);
-static void ProcessGameState(u8* commandParamsData, u8 commandParamsSize);
-static void ProcessPlayerMovement(u8* commandParamsData, u8 commandParamsSize);
+static void ProcessAuthResult(u8* commandParamsData, u16 commandParamsSize);
+static void ProcessJoinResult(u8* commandParamsData, u16 commandParamsSize);
+static void ProcessGameState(u8* commandParamsData, u16 commandParamsSize);
+static void ProcessPlayerMovement(u8* commandParamsData, u16 commandParamsSize);
 static u8 ConvertMovementAction(u8 action);
 
-static void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessAuthResult(u8* commandParamsData, u16 commandParamsSize)
 {
     u32 result;
-    if (commandParamsSize == 4)
+
+    MMOLogf("ProcessAuthResult: size=%d, state=%d", commandParamsSize, gAuthState);
+
+    if (commandParamsSize > 4)
+    {
+        // JWT token received from userpass auth - save it
+        memcpy(gSaveBlock1Ptr->authToken, commandParamsData, commandParamsSize);
+        gSaveBlock1Ptr->authTokenLength = commandParamsSize;
+
+        MMOLog("JWT token received and saved!");
+        sIsAuthenticated = TRUE;
+        gAuthState = AUTH_STATE_AUTHENTICATED;
+        Tcp_Authenticated();
+    }
+    else if (commandParamsSize == 4)
     {
         result = 0;
         result |= commandParamsData[0];
@@ -30,19 +44,18 @@ static void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize)
         {
             MMOLog("Authentication successful!");
             sIsAuthenticated = TRUE;
-            sHasSentAuthRequest = FALSE;
+            gAuthState = AUTH_STATE_AUTHENTICATED;
             Tcp_Authenticated();
         }
         else
         {
             MMOLog("Authentication failed!");
-            sCancellationReason = TCP_CANCEL_CONNECTION_FAILED;
-            sTcpState = TCP_STATE_DISCONNECTED;
+            Tcp_AuthFailed();
         }
     }
 }
 
-static void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessJoinResult(u8* commandParamsData, u16 commandParamsSize)
 {
     if (commandParamsSize == 1)
     {
@@ -51,7 +64,7 @@ static void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize)
 }
 
 // GameState is used only for spawning/positioning NPCs for players already on the map
-static void ProcessGameState(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessGameState(u8* commandParamsData, u16 commandParamsSize)
 {
     u8 playerCount = 0;
     u8 i, j;
@@ -127,7 +140,7 @@ static void ProcessGameState(u8* commandParamsData, u8 commandParamsSize)
 }
 
 // Receives relayed movement actions from other players: [gameUserId(1), action(1)]
-static void ProcessPlayerMovement(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessPlayerMovement(u8* commandParamsData, u16 commandParamsSize)
 {
     u8 gamePlayerId;
     u8 action;
@@ -178,7 +191,7 @@ static u8 ConvertMovementAction(u8 action)
     return action;
 }
 
-void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
+void ProcessCommand(u8 commandType, u8* commandParamsData, u16 commandParamsSize)
 {
     switch (commandType)
     {
@@ -199,21 +212,22 @@ void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
     }
 }
 
-void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
+void SendCommand(u8 commandType, u8* commandParamsData, u16 commandParamsSize)
 {
     u16 i;
 
-    if (gOutgoingCommandsQueueSize + commandParamsSize + 2 > sizeof(gOutgoingCommandsQueue))
+    if (gOutgoingCommandsQueueSize + commandParamsSize + 3 > sizeof(gOutgoingCommandsQueue))
     {
         return;
     }
     gOutgoingCommandsQueue[gOutgoingCommandsQueueSize] = commandType;
-    gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 1] = commandParamsSize;
+    gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 1] = commandParamsSize & 0xFF;
+    gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 2] = (commandParamsSize >> 8) & 0xFF;
     for (i = 0; i < commandParamsSize; i++)
     {
-        gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 2 + i] = commandParamsData[i];
+        gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 3 + i] = commandParamsData[i];
     }
-    gOutgoingCommandsQueueSize += 2 + commandParamsSize;
+    gOutgoingCommandsQueueSize += 3 + commandParamsSize;
     gOutgoingCommandsQueueCount++;
     gIsOutgoingCommandsQueueReady = TRUE;
 }

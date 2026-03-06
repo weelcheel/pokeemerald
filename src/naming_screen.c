@@ -2128,6 +2128,28 @@ static const struct NamingScreenTemplate sWaldaWordsScreenTemplate =
     .title = gText_TellHimTheWords,
 };
 
+static const struct NamingScreenTemplate sUsernameNamingTemplate =
+{
+    .copyExistingString = FALSE,
+    .maxChars = LOGIN_NAME_LENGTH,
+    .iconFunction = 1,
+    .addGenderIcon = FALSE,
+    .initialPage = KBPAGE_LETTERS_UPPER,
+    .unused = 35,
+    .title = gText_Username,
+};
+
+static const struct NamingScreenTemplate sPasswordNamingTemplate =
+{
+    .copyExistingString = FALSE,
+    .maxChars = LOGIN_NAME_LENGTH,
+    .iconFunction = 1,
+    .addGenderIcon = FALSE,
+    .initialPage = KBPAGE_LETTERS_UPPER,
+    .unused = 35,
+    .title = gText_Password,
+};
+
 static const struct NamingScreenTemplate *const sNamingScreenTemplates[] =
 {
     [NAMING_SCREEN_PLAYER]     = &sPlayerNamingScreenTemplate,
@@ -2135,6 +2157,8 @@ static const struct NamingScreenTemplate *const sNamingScreenTemplates[] =
     [NAMING_SCREEN_CAUGHT_MON] = &sMonNamingScreenTemplate,
     [NAMING_SCREEN_NICKNAME]   = &sMonNamingScreenTemplate,
     [NAMING_SCREEN_WALDA]      = &sWaldaWordsScreenTemplate,
+    [NAMING_SCREEN_USERNAME]   = &sUsernameNamingTemplate,
+    [NAMING_SCREEN_PASSWORD]   = &sPasswordNamingTemplate,
 };
 
 static const struct OamData sOam_8x8 =

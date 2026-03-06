@@ -200,6 +200,8 @@ EWRAM_DATA static struct InitialPlayerAvatarState sInitialPlayerAvatarState = {0
 EWRAM_DATA static u16 sAmbientCrySpecies = 0;
 EWRAM_DATA static bool8 sIsAmbientCryWaterMon = FALSE;
 EWRAM_DATA struct LinkPlayerObjectEvent gLinkPlayerObjectEvents[4] = {0};
+EWRAM_DATA static bool8 sWasMoving = FALSE;
+EWRAM_DATA static u8 sLastSentDirection = 0;
 
 static const struct WarpData sDummyWarpData =
 {
@@ -1436,12 +1438,90 @@ bool32 IsOverworldLinkActive(void)
         return FALSE;
 }
 
+static bool8 IsObjectCurrentlyMoving(struct ObjectEvent* objectEvent)
+{
+    // Require coords to change
+    if(objectEvent->currentCoords.x == objectEvent->previousCoords.x && objectEvent->currentCoords.y == objectEvent->previousCoords.y)
+        return FALSE;
+
+    // Certain actions are illegal as they will cause the position to get lost be observing client
+    if(objectEvent->movementActionId <= MOVEMENT_ACTION_FACE_RIGHT) // objectEvent->movementActionId >= MOVEMENT_ACTION_FACE_DOWN implied
+        return FALSE;
+
+    if(objectEvent->movementActionId >= MOVEMENT_ACTION_WALK_IN_PLACE_SLOW_DOWN && objectEvent->movementActionId <= MOVEMENT_ACTION_WALK_IN_PLACE_FASTER_RIGHT)
+        return FALSE;
+
+    if(objectEvent->movementActionId >= MOVEMENT_ACTION_DELAY_1 && objectEvent->movementActionId <= MOVEMENT_ACTION_DELAY_16)
+        return FALSE;
+
+    if(objectEvent->movementActionId >= MOVEMENT_ACTION_WALK_IN_PLACE_SLOW_DOWN && objectEvent->movementActionId <= MOVEMENT_ACTION_WALK_IN_PLACE_FASTER_RIGHT)
+        return FALSE;
+
+    return TRUE;
+}
+
+static void SendPlayerMoveCommand(void)
+{
+    struct ObjectEvent *objectEvent;
+    bool8 isMoving;
+    u8 moveCommandData[7];
+
+    if (gPlayerAvatar.objectEventId == OBJECT_EVENTS_COUNT)
+        return;
+
+    objectEvent = &gObjectEvents[gPlayerAvatar.objectEventId];
+    isMoving = IsObjectCurrentlyMoving(objectEvent);
+
+    if (isMoving && !sWasMoving)
+    {
+        // Only send if position actually changed (skip wall bumps where coords stay the same)
+        if (objectEvent->currentCoords.x != objectEvent->previousCoords.x
+            || objectEvent->currentCoords.y != objectEvent->previousCoords.y)
+        {
+            moveCommandData[0] = objectEvent->movementActionId;
+            memcpy(moveCommandData + 1, &objectEvent->currentCoords.x, 2);
+            memcpy(moveCommandData + 3, &objectEvent->currentCoords.y, 2);
+            moveCommandData[5] = objectEvent->currentElevation;
+            moveCommandData[6] = objectEvent->facingDirection;
+            SendCommand(COMMAND_MOVE, moveCommandData, 7);
+            sLastSentDirection = objectEvent->facingDirection;
+        }
+    }
+    else if (!isMoving && sWasMoving)
+    {
+        // Movement just stopped - send a face action to stop the walk animation
+        if (objectEvent->facingDirection != DIR_NONE)
+        {
+            u8 faceAction = MOVEMENT_ACTION_FACE_DOWN + (objectEvent->facingDirection - 1);
+            moveCommandData[0] = faceAction;
+            memcpy(moveCommandData + 1, &objectEvent->currentCoords.x, 2);
+            memcpy(moveCommandData + 3, &objectEvent->currentCoords.y, 2);
+            moveCommandData[5] = objectEvent->currentElevation;
+            moveCommandData[6] = objectEvent->facingDirection;
+            SendCommand(COMMAND_MOVE, moveCommandData, 7);
+            sLastSentDirection = objectEvent->facingDirection;
+        }
+    }
+    else if (!isMoving && objectEvent->facingDirection != DIR_NONE
+             && objectEvent->facingDirection != sLastSentDirection)
+    {
+        // Direction changed while stationary - send a face action
+        u8 faceAction = MOVEMENT_ACTION_FACE_DOWN + (objectEvent->facingDirection - 1);
+        moveCommandData[0] = faceAction;
+        memcpy(moveCommandData + 1, &objectEvent->currentCoords.x, 2);
+        memcpy(moveCommandData + 3, &objectEvent->currentCoords.y, 2);
+        moveCommandData[5] = objectEvent->currentElevation;
+        moveCommandData[6] = objectEvent->facingDirection;
+        SendCommand(COMMAND_MOVE, moveCommandData, 7);
+        sLastSentDirection = objectEvent->facingDirection;
+    }
+
+    sWasMoving = isMoving;
+}
+
 static void DoCB1_Overworld(u16 newKeys, u16 heldKeys)
 {
     struct FieldInput inputStruct;
-    u8 moveCommandData[7];
-
-    memset(moveCommandData, 0, 7);
 
     UpdatePlayerAvatarTransitionState();
     FieldClearPlayerInput(&inputStruct);
@@ -1456,13 +1536,7 @@ static void DoCB1_Overworld(u16 newKeys, u16 heldKeys)
         else
         {
             PlayerStep(inputStruct.dpadDirection, newKeys, heldKeys);
-            
-            memcpy(moveCommandData, &gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.x, 2);
-            memcpy(moveCommandData + 2, &gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.x, 2);
-            moveCommandData[4] = gObjectEvents[gPlayerAvatar.objectEventId].movementActionId;
-            moveCommandData[5] = gObjectEvents[gPlayerAvatar.objectEventId].currentElevation;
-            moveCommandData[6] = gObjectEvents[gPlayerAvatar.objectEventId].previousMovementDirection;
-            SendCommand(COMMAND_MOVE, moveCommandData, 7);
+            SendPlayerMoveCommand();
         }
     }
 }

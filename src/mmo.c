@@ -4,19 +4,21 @@
 #include "constants/event_objects.h"
 #include "event_object_movement.h"
 
-EWRAM_DATA u8 gMultiplayer[4096] = {0};
+#define MOVEMENT_BUFFER_SIZE 40
+
 EWRAM_DATA u8 gGameUserId = 0;
 
-void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize);
-void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize);
-void ProcessGameState(u8* commandParamsData, u8 commandParamsSize);
+static void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize);
+static void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize);
+static void ProcessGameState(u8* commandParamsData, u8 commandParamsSize);
+static void ProcessPlayerMovement(u8* commandParamsData, u8 commandParamsSize);
+static u8 ConvertMovementAction(u8 action);
 
-void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize)
 {
     u32 result;
     if (commandParamsSize == 4)
     {
-        // print each byte of the commandParamsData
         result = 0;
         result |= commandParamsData[0];
         result |= commandParamsData[1] << 8;
@@ -40,7 +42,7 @@ void ProcessAuthResult(u8* commandParamsData, u8 commandParamsSize)
     }
 }
 
-void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize)
+static void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize)
 {
     if (commandParamsSize == 1)
     {
@@ -48,60 +50,136 @@ void ProcessJoinResult(u8* commandParamsData, u8 commandParamsSize)
     }
 }
 
-void ProcessGameState(u8* commandParamsData, u8 commandParamsSize)
+// GameState is used only for spawning/positioning NPCs for players already on the map
+static void ProcessGameState(u8* commandParamsData, u8 commandParamsSize)
 {
     u8 playerCount = 0;
-    u8 i;
+    u8 i, j;
     u8 gamePlayerId;
 
     s16 x, y;
-    u8 action, currentElevation, facingDirection;
+    u8 currentElevation, facingDirection;
     u8 objectEventId;
+    bool8 found;
 
     if (commandParamsSize >= 1)
     {
         playerCount = commandParamsData[0];
     }
 
+    // Despawn MMO NPCs no longer in the game state
+    for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
+    {
+        if (!gObjectEvents[i].active)
+            continue;
+        if (!IsMMOObjectEvent(&gObjectEvents[i]))
+            continue;
+
+        found = FALSE;
+        for (j = 0; j < playerCount; j++)
+        {
+            gamePlayerId = commandParamsData[1 + (j * (8 + MOVEMENT_BUFFER_SIZE))];
+            if (gamePlayerId == gGameUserId)
+                continue;
+            if (OBJ_EVENT_ID_MMO_FIRST + gamePlayerId == gObjectEvents[i].localId)
+            {
+                found = TRUE;
+                break;
+            }
+        }
+        if (!found)
+        {
+            RemoveMMOObjectEvent(i);
+        }
+    }
+
+    // Spawn new NPCs or update existing ones
     for (i = 0; i < playerCount; i++)
     {
-        gamePlayerId = commandParamsData[1 + i * 8];
+        gamePlayerId = commandParamsData[1 + (i * (8 + MOVEMENT_BUFFER_SIZE))];
         if (gamePlayerId == gGameUserId)
+            continue;
+
+        gamePlayerId = OBJ_EVENT_ID_MMO_FIRST + gamePlayerId;
+        memcpy(&x, commandParamsData + 2 + (i * (8 + MOVEMENT_BUFFER_SIZE)), 2);
+        memcpy(&y, commandParamsData + 4 + (i * (8 + MOVEMENT_BUFFER_SIZE)), 2);
+
+        currentElevation = commandParamsData[7 + (i * (8 + MOVEMENT_BUFFER_SIZE))];
+        facingDirection = commandParamsData[8 + (i * (8 + MOVEMENT_BUFFER_SIZE))];
+
+        objectEventId = GetMMOObjectEventIdByLocalId(gamePlayerId);
+        if (objectEventId == OBJECT_EVENTS_COUNT)
         {
-            // do nothing for now, should do some things like corrections teleportations and so forth
+            // Only spawn if we have a valid position (not 0,0 default)
+            if (x != 0 || y != 0)
+                SpawnSpecialObjectEventParameterized(OBJ_EVENT_GFX_BRENDAN_NORMAL, MOVEMENT_TYPE_NONE, gamePlayerId, x, y, currentElevation);
         }
         else
         {
-            gamePlayerId = OBJ_EVENT_ID_MMO_FIRST + gamePlayerId;
-            x = 0;
-            x = commandParamsData[2 + i * 8];
-            x |= commandParamsData[3 + i * 8] << 8;
-
-            y = 0;
-            y = commandParamsData[4 + i * 8];
-            y |= commandParamsData[5 + i * 8] << 8;
-
-            action = commandParamsData[6 + i * 8];
-            currentElevation = commandParamsData[7 + i * 8];
-            facingDirection = commandParamsData[8 + i * 8];
-
-            objectEventId = GetMMOObjectEventIdByLocalId(gamePlayerId);
-            if (objectEventId == OBJECT_EVENTS_COUNT)
+            // Only correct position when NPC is not mid-movement to avoid teleporting
+            if (!ObjectEventIsHeldMovementActive(&gObjectEvents[objectEventId]))
             {
-                objectEventId = SpawnSpecialObjectEventParameterized(OBJ_EVENT_GFX_FAT_MAN, MOVEMENT_TYPE_NONE, gamePlayerId, x, y, currentElevation);
-            }
-            if (objectEventId != OBJECT_EVENTS_COUNT)
-            {
-                struct ObjectEvent* objectEvent = &gObjectEvents[objectEventId];
-                MoveObjectEventToMapCoords(objectEvent, x, y);
+                MoveObjectEventToMapCoords(&gObjectEvents[objectEventId], x, y);
+                gObjectEvents[objectEventId].currentElevation = currentElevation;
             }
         }
     }
 }
 
+// Receives relayed movement actions from other players: [gameUserId(1), action(1)]
+static void ProcessPlayerMovement(u8* commandParamsData, u8 commandParamsSize)
+{
+    u8 gamePlayerId;
+    u8 action;
+    u8 objectEventId;
+    struct ObjectEvent* objectEvent;
+
+    if (commandParamsSize < 2)
+        return;
+
+    gamePlayerId = commandParamsData[0];
+    action = commandParamsData[1];
+
+    if (gamePlayerId == gGameUserId)
+        return;
+
+    gamePlayerId = OBJ_EVENT_ID_MMO_FIRST + gamePlayerId;
+    objectEventId = GetMMOObjectEventIdByLocalId(gamePlayerId);
+    if (objectEventId == OBJECT_EVENTS_COUNT)
+        return;
+
+    objectEvent = &gObjectEvents[objectEventId];
+    if (!objectEvent->active)
+        return;
+
+    action = ConvertMovementAction(action);
+
+    // Face actions: apply immediately
+    if (action <= MOVEMENT_ACTION_FACE_RIGHT)
+    {
+        u8 direction = action - MOVEMENT_ACTION_FACE_DOWN + 1; // FACE_DOWN=0 -> DIR_SOUTH=1
+        ObjectEventTurnByLocalIdAndMap(objectEvent->localId, objectEvent->mapNum, objectEvent->mapGroup, direction);
+        return;
+    }
+
+    // Walk actions: clear current movement and set new one
+    ObjectEventClearHeldMovementIfActive(objectEvent);
+    ObjectEventSetHeldMovement(objectEvent, action);
+}
+
+// Convert player-specific movement actions to NPC-compatible ones
+static u8 ConvertMovementAction(u8 action)
+{
+    // Convert PLAYER_RUN to WALK_FAST (NPCs can't use player-specific actions)
+    if (action >= MOVEMENT_ACTION_PLAYER_RUN_DOWN && action <= MOVEMENT_ACTION_PLAYER_RUN_RIGHT)
+    {
+        return MOVEMENT_ACTION_WALK_FAST_DOWN + (action - MOVEMENT_ACTION_PLAYER_RUN_DOWN);
+    }
+    return action;
+}
+
 void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
 {
-    MMOLogf("Processing command: %d", commandType);
     switch (commandType)
     {
         case COMMAND_AUTH_RESULT:
@@ -113,6 +191,9 @@ void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
         case COMMAND_GAME_STATE:
             ProcessGameState(commandParamsData, commandParamsSize);
             break;
+        case COMMAND_PLAYER_MOVEMENT:
+            ProcessPlayerMovement(commandParamsData, commandParamsSize);
+            break;
         default:
             break;
     }
@@ -120,36 +201,25 @@ void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
 
 void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize)
 {
-    u8 commandBytes[2 + commandParamsSize];
     u16 i;
 
-    memset(commandBytes, 0, sizeof(commandBytes));
     if (gOutgoingCommandsQueueSize + commandParamsSize + 2 > sizeof(gOutgoingCommandsQueue))
     {
-        // not enough space in the queue to send the command
-        MMOLogf("Not enough space in outgoing commands queue for command %d", commandType);
         return;
     }
-    commandBytes[0] = commandType;
-    commandBytes[1] = commandParamsSize;
-    for (i=0; i < commandParamsSize; i++)
+    gOutgoingCommandsQueue[gOutgoingCommandsQueueSize] = commandType;
+    gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 1] = commandParamsSize;
+    for (i = 0; i < commandParamsSize; i++)
     {
-        commandBytes[2 + i] = commandParamsData[i];
+        gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + 2 + i] = commandParamsData[i];
     }
-    // if (commandParamsSize > 0)
-    // {
-    //     memcpy(commandBytes + 2, commandParamsData, commandParamsSize);
-    //     //memset(gOutgoingCommandsQueue + 2, commandParamsSize, commandParamsSize);
-    // }
-    // memcpy(gOutgoingCommandsQueue + gOutgoingCommandsQueueSize, commandBytes, commandParamsSize + 2);
-    // gOutgoingCommandsQueueSize += commandParamsSize + 2;
-    for (i=0; i < commandParamsSize + 2; i++)
-    {
-        gOutgoingCommandsQueue[gOutgoingCommandsQueueSize + i] = commandBytes[i];
-    }
-    gOutgoingCommandsQueueSize += 2+commandParamsSize;
+    gOutgoingCommandsQueueSize += 2 + commandParamsSize;
     gOutgoingCommandsQueueCount++;
     gIsOutgoingCommandsQueueReady = TRUE;
+}
 
-    MMOLogf("Queued command %d with size %d | %d commands queued", commandType, commandParamsSize, gOutgoingCommandsQueueCount);
+bool8 IsMMOObjectEvent(struct ObjectEvent *objectEvent)
+{
+    return objectEvent->localId >= OBJ_EVENT_ID_MMO_FIRST
+        && objectEvent->localId != OBJ_EVENT_ID_PLAYER;
 }

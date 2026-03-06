@@ -1386,6 +1386,12 @@ void RemoveObjectEventByLocalIdAndMap(u8 localId, u8 mapNum, u8 mapGroup)
     }
 }
 
+void RemoveMMOObjectEvent(u8 objectEventId)
+{
+    if (objectEventId < OBJECT_EVENTS_COUNT && gObjectEvents[objectEventId].active)
+        RemoveObjectEvent(&gObjectEvents[objectEventId]);
+}
+
 static void RemoveObjectEventInternal(struct ObjectEvent *objectEvent)
 {
     struct SpriteFrameImage image;
@@ -4721,11 +4727,19 @@ static bool8 DoesObjectCollideWithObjectAt(struct ObjectEvent *objectEvent, s16 
     u8 i;
     struct ObjectEvent *curObject;
 
+    // MMO NPCs never collide with anything
+    if (IsMMOObjectEvent(objectEvent))
+        return FALSE;
+
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         curObject = &gObjectEvents[i];
         if (curObject->active && curObject != objectEvent)
         {
+            // Skip MMO NPCs so they don't block the player or world NPCs
+            if (IsMMOObjectEvent(curObject))
+                continue;
+
             if ((curObject->currentCoords.x == x && curObject->currentCoords.y == y) || (curObject->previousCoords.x == x && curObject->previousCoords.y == y))
             {
                 if (AreElevationsCompatible(objectEvent->currentElevation, curObject->currentElevation))

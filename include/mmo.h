@@ -15,9 +15,11 @@ enum {
     COMMAND_JOIN_MAP_RESULT,
     COMMAND_MOVE,
     COMMAND_GAME_STATE,
+    COMMAND_PLAYER_MOVEMENT,
 };
 
 void ProcessCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize);
 void SendCommand(u8 commandType, u8* commandParamsData, u8 commandParamsSize);
+bool8 IsMMOObjectEvent(struct ObjectEvent *objectEvent);
 
 #endif //GUARD_MMO_H
